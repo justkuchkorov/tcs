@@ -47,5 +47,33 @@ class ElectricVehiclePlant:
         slip = clamp(slip_ratio, -1.5, 1.5)
         base_mu = self.D * math.sin(
             self.C * math.atan(self.B * slip - self.E * (self.B * slip - math.atan(self.B * slip)))
+    def calculate_physics_step(self, motor_torque, dt):
+        """Advance the plant by one discrete simulation step."""
+        if self.velocity < 0.01 and self.wheel_omega < 0.01 and abs(motor_torque) < 1e-6:
+            self.velocity = 0.0
+            self.wheel_omega = 0.0
+            self.slip_ratio = 0.0
+            self.longitudinal_accel = 0.0
+            return
+
+        wheel_linear_speed = self.wheel_omega * self.wheel_radius
+        self.slip_ratio = self.calculate_slip_ratio(wheel_linear_speed)
+
+        self.driven_axle_load = self.calculate_driven_axle_load()
+        load_per_driven_wheel = self.driven_axle_load / self.driven_wheels
+
+        mu = self.calculate_magic_formula_mu(self.slip_ratio)
+        tire_force_per_wheel = mu * load_per_driven_wheel
+        total_tire_force = tire_force_per_wheel * self.driven_wheels
+
+        aero_drag = 0.5 * self.air_density * self.drag_coeff * self.frontal_area * (self.velocity ** 2)
+        rolling_resistance = self.rolling_resistance_coeff * self.mass * self.gravity
+
+        wheel_alpha = (motor_torque - (tire_force_per_wheel * self.wheel_radius)) / self.wheel_inertia
+        self.wheel_omega = max(0.0, self.wheel_omega + wheel_alpha * dt)
+
+        vehicle_accel = (total_tire_force - aero_drag - rolling_resistance) / self.mass
+        self.longitudinal_accel = vehicle_accel
+        self.velocity = max(0.0, self.velocity + vehicle_accel * dt)
         )
         return self.road_mu_scale * base_mu
