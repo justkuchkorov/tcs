@@ -1,5 +1,6 @@
 import math
-
+import time
+from pyModbusTCP.server import ModbusServer
 def clamp(value, min_value, max_value):
     """Limit a numeric value to the closed interval [min_value, max_value]."""
     return max(min_value, min(value, max_value))
@@ -47,6 +48,7 @@ class ElectricVehiclePlant:
         slip = clamp(slip_ratio, -1.5, 1.5)
         base_mu = self.D * math.sin(
             self.C * math.atan(self.B * slip - self.E * (self.B * slip - math.atan(self.B * slip)))
+        return self.road_mu_scale * base_mu
     def calculate_physics_step(self, motor_torque, dt):
         """Advance the plant by one discrete simulation step."""
         if self.velocity < 0.01 and self.wheel_omega < 0.01 and abs(motor_torque) < 1e-6:
@@ -76,4 +78,48 @@ class ElectricVehiclePlant:
         self.longitudinal_accel = vehicle_accel
         self.velocity = max(0.0, self.velocity + vehicle_accel * dt)
         )
-        return self.road_mu_scale * base_mu
+
+def run_hil_plant():
+    print("--- HIL Vehicle Plant Starting ---")
+    ev = ElectricVehiclePlant()
+    server = ModbusServer(host="0.0.0.0", port=5020, no_block=True)
+    
+    try:
+        server.start()
+        print("Modbus Server Online (Port 5020). Waiting for PLC torque command...")
+    except Exception as exc:
+        print(f"Modbus Boot Failed: {exc}")
+        return
+
+    dt = 0.02
+    try:
+        while True:
+            loop_start = time.time()
+
+            raw_torque = server.data_bank.get_holding_registers(0, 1)
+            plc_motor_torque = float(raw_torque[0]) if raw_torque else 0.0
+
+            ev.calculate_physics_step(motor_torque=plc_motor_torque, dt=dt)
+            
+            scaled_velocity = int(ev.velocity * 100)
+            scaled_wheel_speed = int((ev.wheel_omega * ev.wheel_radius) * 100)
+            scaled_slip = int(ev.slip_ratio * 1000)
+            scaled_axle_load = int(ev.driven_axle_load)
+            server.data_bank.set_holding_registers(
+                1, [scaled_velocity, scaled_wheel_speed, scaled_slip, scaled_axle_load]
+            )
+
+            status = "ACCELERATING" if plc_motor_torque > 0 else "COASTING    "
+            print(f"[{status}] Torque: {plc_motor_torque:6.1f} Nm | Veh Spd: {ev.velocity:5.2f} m/s | Slip: {ev.slip_ratio:6.3f}   ", end="\r")
+
+            sleep_time = dt - (time.time() - loop_start)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    except KeyboardInterrupt:
+        print("\n\nSimulation Stopped.")
+    finally:
+        server.stop()
+
+if __name__ == "__main__":
+    run_hil_plant()
