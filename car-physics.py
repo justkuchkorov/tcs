@@ -1,12 +1,21 @@
 import time
 import math
+import threading
+import tkinter as tk
 import matplotlib.pyplot as plt
 from pyModbusTCP.server import ModbusServer
 
+
 def clamp(value, min_value, max_value):
+    """Limit a numeric value to the closed interval [min_value, max_value]."""
     return max(min_value, min(value, max_value))
 
+
 class ElectricVehiclePlant:
+    """
+    Simplified longitudinal EV plant model for HIL testing.
+    """
+
     def __init__(self):
         self.mass = 1500.0
         self.wheel_radius = 0.3
@@ -21,7 +30,8 @@ class ElectricVehiclePlant:
         self.driven_wheels = 2
         self.static_driven_axle_load_ratio = 0.50
         self.rolling_resistance_coeff = 0.015
-        self.road_mu_scale = 1.0
+
+        self.road_mu_scale = 1.0 
         self.low_speed_reference = 0.5
 
         self.B = 10.0
@@ -37,27 +47,15 @@ class ElectricVehiclePlant:
 
     def calculate_driven_axle_load(self):
         static_load = self.mass * self.gravity * self.static_driven_axle_load_ratio
-
         dynamic_transfer = (self.mass * self.longitudinal_accel * self.cg_height) / self.wheelbase
         driven_axle_load = static_load + dynamic_transfer
-
         return clamp(driven_axle_load, 0.20 * self.mass * self.gravity, 0.90 * self.mass * self.gravity)
 
     def calculate_slip_ratio(self, wheel_linear_speed):
-        """
-        Compute longitudinal slip ratio using a low-speed-safe reference speed.
-
-        wheel_linear_speed is the tangential wheel speed at the tire tread [m/s].
-        """
         reference_speed = max(abs(self.velocity), abs(wheel_linear_speed), self.low_speed_reference)
         return (wheel_linear_speed - self.velocity) / reference_speed
 
     def calculate_magic_formula_mu(self, slip_ratio):
-        """
-        Convert slip ratio into tire-road friction coefficient mu.
-
-        This is a 1D longitudinal Pacejka Magic Formula implementation.
-        """
         slip = clamp(slip_ratio, -1.5, 1.5)
         base_mu = self.D * math.sin(
             self.C * math.atan(self.B * slip - self.E * (self.B * slip - math.atan(self.B * slip)))
@@ -65,18 +63,13 @@ class ElectricVehiclePlant:
         return self.road_mu_scale * base_mu
 
     def calculate_physics_step(self, motor_torque, dt):
-        """
-        Advance the plant by one discrete simulation step.
-
-        motor_torque: commanded wheel torque from the PLC [Nm]
-        dt: simulation time step [s]
-        """
         if self.velocity < 0.01 and self.wheel_omega < 0.01 and abs(motor_torque) < 1e-6:
             self.velocity = 0.0
             self.wheel_omega = 0.0
             self.slip_ratio = 0.0
             self.longitudinal_accel = 0.0
             return
+
         wheel_linear_speed = self.wheel_omega * self.wheel_radius
         self.slip_ratio = self.calculate_slip_ratio(wheel_linear_speed)
 
@@ -97,9 +90,38 @@ class ElectricVehiclePlant:
         self.longitudinal_accel = vehicle_accel
         self.velocity = max(0.0, self.velocity + vehicle_accel * dt)
 
+def start_weather_dashboard(ev_plant):
+    """Runs a small GUI in a background thread to change weather live."""
+    def set_asphalt():
+        ev_plant.road_mu_scale = 1.0
+        print("\n\n>>> [WEATHER UPDATE] Road surface changed to DRY ASPHALT (100% Grip) <<<\n")
+
+    def set_rain():
+        ev_plant.road_mu_scale = 0.6
+        print("\n\n>>> [WEATHER UPDATE] Road surface changed to WET RAIN (60% Grip) <<<\n")
+
+    def set_ice():
+        ev_plant.road_mu_scale = 0.2
+        print("\n\n>>> [WEATHER UPDATE] Road surface changed to SOLID ICE (20% Grip) <<<\n")
+
+    root = tk.Tk()
+    root.title("Weather Control")
+    root.geometry("250x160")
+    root.attributes("-topmost", True) # Forces window to stay on top of other apps
+
+    tk.Label(root, text="Environmental Settings", font=("Helvetica", 11, "bold")).pack(pady=5)
+    tk.Button(root, text="Dry Asphalt (\u03bc = 1.0)", bg="darkgray", fg="white", font=("Arial", 10, "bold"), command=set_asphalt).pack(fill=tk.X, padx=10, pady=2)
+    tk.Button(root, text="Wet Rain (\u03bc = 0.6)", bg="royalblue", fg="white", font=("Arial", 10, "bold"), command=set_rain).pack(fill=tk.X, padx=10, pady=2)
+    tk.Button(root, text="Solid Ice (\u03bc = 0.2)", bg="lightblue", font=("Arial", 10, "bold"), command=set_ice).pack(fill=tk.X, padx=10, pady=2)
+
+    root.mainloop()
+
 def run_hil_plant():
     print("--- Upgraded HIL Vehicle Plant Starting ---")
     ev = ElectricVehiclePlant()
+
+    gui_thread = threading.Thread(target=start_weather_dashboard, args=(ev,), daemon=True)
+    gui_thread.start()
 
     log_time = []
     log_torque = []
@@ -112,7 +134,7 @@ def run_hil_plant():
     try:
         server.start()
         print("Modbus Server Online (Port 5020). Waiting for PLC torque command...")
-        print(">>> PRESS 'Ctrl+C' TO STOP SIMULATION AND GENERATE GRAPH <<<")
+        print(">>> PRESS 'Ctrl+C' IN THIS TERMINAL TO STOP SIMULATION AND GENERATE GRAPH <<<")
     except Exception as exc:
         print(f"Modbus Boot Failed: {exc}")
         return
@@ -149,7 +171,7 @@ def run_hil_plant():
             print(
                 f"[{status}] Torque: {plc_motor_torque:6.1f} Nm | Veh Spd: {ev.velocity:5.2f} m/s "
                 f"| Whl Spd: {ev.wheel_omega * ev.wheel_radius:5.2f} m/s | Slip: {ev.slip_ratio:6.3f} "
-                f"| Axle Load: {ev.driven_axle_load:7.1f} N   ",
+                f"| Axle Load: {ev.driven_axle_load:7.1f} N | Grip: {ev.road_mu_scale*100:3.0f}%  ",
                 end="\r",
             )
 
@@ -168,7 +190,7 @@ def run_hil_plant():
             plt.subplot(4, 1, 1)
             plt.plot(log_time, log_torque, "k-", linewidth=2, label="Motor Torque (Nm)")
             plt.ylabel("Torque [Nm]")
-            plt.title("HIL Plant Response: Longitudinal EV Model")
+            plt.title("HIL Plant Response: Dynamic Weather Intervention")
             plt.legend(loc="upper left")
             plt.grid(True)
 
