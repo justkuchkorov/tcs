@@ -42,4 +42,10 @@ The project is split into two distinct environments communicating over a local M
 7. To generate telemetry graphs, toggle bStartTest to FALSE, wait 2 seconds, and press Ctrl+C in the Python terminal.
 
 ### Result
+Dry Asphalt 
 <img width="1920" height="1020" alt="image" src="https://github.com/user-attachments/assets/16d22164-e9d7-4d02-bb3f-0cf988a33c0a" />
+Solid Ice
+<img width="1920" height="967" alt="solid-ice-1" src="https://github.com/user-attachments/assets/d12405c1-5e95-4960-ab5e-9bd83bec39d6" />
+Wet Rain
+<img width="1920" height="967" alt="wet-rain-1" src="https://github.com/user-attachments/assets/9347b06f-0184-4d37-81c6-01709bf7369b" />
+
