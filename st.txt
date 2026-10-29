@@ -1,0 +1,172 @@
+FUNCTION Scale_INT_to_REAL : REAL
+VAR_INPUT
+    ivalue : INT;
+    rscalefactor : REAL;
+END_VAR
+
+Scale_INT_to_REAL := INT_TO_REAL(ivalue) / rscalefactor;
+
+FUNCTION Scale_REAL_to_INT : INT
+VAR_INPUT
+    rvalue : REAL;
+    rscalefactor : REAL;
+END_VAR
+
+Scale_REAL_to_INT := REAL_TO_INT(rvalue * rscalefactor);
+
+FUNCTION_BLOCK FB_RateLimiter
+VAR_INPUT
+	rtarget:REAL;
+	rmaxrise:REAL;
+	rmaxfall:REAL;
+END_VAR
+VAR_OUTPUT
+	rout:real;
+END_VAR
+VAR
+END_VAR
+
+IF rtarget > (rout + rmaxrise) THEN
+    rout := rout + rmaxrise;
+ELSIF rtarget < (rout - rmaxfall) THEN
+    rout := rout - rmaxfall;
+ELSE
+    rout := rtarget;
+END_IF;
+
+FUNCTION_BLOCK FB_LowPassFilter
+VAR_INPUT
+	rin:REAL;
+	ralpha:REAL;
+END_VAR
+VAR_OUTPUT
+	rout:REAL;
+END_VAR
+VAR
+END_VAR
+
+rout:=rout+ralpha*(rin-rout);
+
+PROGRAM PLC_PRG
+VAR
+    Python_Velocity      : INT;
+    Python_WheelSpeed    : INT;
+    Python_SlipRatio     : INT;
+    Python_DriverRequest : INT;
+    PLC_TorqueCommand    : INT;
+	Python_Counter       : INT;
+    Last_Counter         : INT;
+
+    rVehicleSpeed     : REAL;
+    rWheelSpeed       : REAL;
+    rSlipRatioRaw     : REAL;
+    rDriverRequestRaw : REAL;
+    rTargetTorque     : REAL;
+
+	rKp : REAL:=800;
+	rKi : REAL:=3170;
+
+    rSlipRatioFilt     : REAL;
+    rDriverRequestFilt : REAL;
+    rLaunchTorqueLimit : REAL := 170;
+    rSlipSetpoint      : REAL := 0.15;
+    iDriveState        : INT := 0;
+	rPmax 			   : REAL := 75000.0;
+	rWheelRadius       : REAL := 0.347;
+	rTorqueAvailable   : REAL;
+
+    slipFilter    : FB_LowPassFilter;
+    driverFilter  : FB_LowPassFilter;
+    myPI          : FB_PI;
+    torqueLimiter : FB_RateLimiter;
+	
+	rVref      					 : REAL := 30.0;
+	rGainFloor				     : REAL:=0.067;
+	rNearTarget  				 : REAL:=0.07;
+	rGainScale, rKpUsed, rKiUsed : REAL;
+END_VAR
+
+IF Python_Counter <> Last_Counter THEN
+
+    rVehicleSpeed      := Scale_INT_to_REAL(ivalue := Python_Velocity, rscalefactor := 100.0);
+    rWheelSpeed        := Scale_INT_to_REAL(ivalue := Python_WheelSpeed, rscalefactor := 100.0);
+    rSlipRatioRaw      := Scale_INT_to_REAL(ivalue := Python_SlipRatio, rscalefactor := 1000.0);
+    rDriverRequestRaw  := Scale_INT_to_REAL(ivalue := Python_DriverRequest, rscalefactor := 1.0);
+
+    slipFilter(rin := rSlipRatioRaw, ralpha := 0.3);
+    rSlipRatioFilt := slipFilter.rout;
+
+    driverFilter(rin := rDriverRequestRaw, ralpha := 0.3);
+    rDriverRequestFilt := driverFilter.rout;
+
+    IF rVehicleSpeed < 0.5 THEN
+        iDriveState := 1;
+    ELSE
+        iDriveState := 2;
+    END_IF;
+	
+	rGainScale := MIN(1.0, MAX(rGainFloor, rVehicleSpeed / rVref));
+	IF (rSlipSetpoint - rSlipRatioFilt) < rNearTarget THEN
+		rKpUsed := rKp * rGainScale;
+		rKiUsed := rKi * rGainScale;
+	ELSE
+		rKpUsed := rKp;
+		rKiUsed := rKi;
+	END_IF
+	
+    CASE iDriveState OF
+        1:   
+            rTargetTorque := MIN(rDriverRequestFilt, rLaunchTorqueLimit);
+            
+            myPI(rerror := (rSlipSetpoint - rSlipRatioFilt), rkp := rKpUsed, rki := rKiUsed, rmax := rTargetTorque, rmin := rTargetTorque, rdt := 0.02);
+            
+        2: 
+            IF rWheelSpeed > 0.5 THEN
+				rTorqueAvailable := MIN(rDriverRequestFilt, rPmax / (rWheelSpeed / rWheelRadius));
+			ELSE
+				rTorqueAvailable := rDriverRequestFilt;
+			END_IF
+			myPI(
+                rerror := (rSlipSetpoint - rSlipRatioFilt), 
+                rkp := rKpUsed, 
+                rki := rKiUsed, 
+                rmax := rTorqueAvailable, 
+                rmin := 0.0,                
+                rdt := 0.02
+            );
+            rTargetTorque := myPI.rout;
+    END_CASE;
+
+    torqueLimiter(rtarget := rTargetTorque, rmaxrise := 35.0, rmaxfall := 120.0);
+
+    PLC_TorqueCommand := Scale_REAL_to_INT(rvalue := torqueLimiter.rout, rscalefactor := 10.0);
+    
+    Last_Counter := Python_Counter;
+
+END_IF;
+
+FUNCTION_BLOCK FB_PI
+VAR_INPUT
+	rerror:REAL;
+	rkp:REAL;
+	rki:REAL;
+	rmax:REAL;
+	rmin:REAL;
+	rdt:REAL;
+END_VAR
+VAR_OUTPUT
+	rout:REAL;
+END_VAR
+VAR
+	ri_memory:real;
+END_VAR
+
+ri_memory:=ri_memory+(rerror*rki*rdt);
+rout:=ri_memory+(rerror*rkp);
+IF rout>rmax THEN
+	rout:=rmax;
+	ri_memory:=rmax-(rerror*rkp);
+ELSIF rout<rmin THEN
+	rout:=rmin;
+	ri_memory:=rmin-(rerror*rkp);
+END_IF

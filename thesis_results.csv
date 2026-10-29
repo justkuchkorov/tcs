@@ -1,0 +1,7 @@
+file,speed at 10 s,peak slip,0-100,last time above 0.2
+final_A1.csv,28.25,0.9934,9.82,11.36
+final_A2.csv,34.34,1.0,7.08,still out at the end
+final_B1.csv,23.49,0.1517,11.6,Never Lost Control
+final_B2.csv,28.36,1.0,9.78,7.32
+final_C1.csv,5.58,0.1537,Did not reach 100 km/h,Never Lost Control
+final_C2.csv,5.38,1.0,Did not reach 100 km/h,still out at the end
