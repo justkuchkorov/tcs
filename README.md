@@ -12,6 +12,8 @@ A Python program simulates the car. A traction controller written in Structured 
 CODESYS SoftPLC. The two exchange data over Modbus TCP every 20 ms of car time, and the
 controller holds the slip of the driven wheel at 0.15.
 
+![The two programs and what they exchange](figures/overview.png)
+
 ## Files
 
 | File | What it is |
@@ -20,6 +22,7 @@ controller holds the slip of the driven wheel at 0.15.
 | `st.txt` | the controller, exported from CODESYS: `PLC_PRG`, `FB_PI`, `FB_LowPassFilter`, `FB_RateLimiter` and two scaling functions |
 | `thesis_results.py` | reads the six final logs and writes `thesis_results.csv` |
 | `final_A1.csv` … `final_C2.csv` | the six final runs (20 s each, 1000 rows) |
+| `figures/` | the graphs below, drawn from the six logs |
 | `thesis_results.csv` | speed at 10 s, peak slip, 0–100 km/h and the last time the slip was above 0.2, for each run |
 
 ## The car model (`plant_v2.py`)
@@ -76,6 +79,28 @@ When the road turns to ice, the controller brings the slip back under 0.2 in 1.3
 the wheel spins at slip 1.0 to the end. On ice the controller is also faster: 11.46 m/s at 20 s
 against 10.64 m/s. On dry and wet the car without it is faster in a straight line, because the
 model has no steering and a spinning tyre still keeps most of its grip.
+
+### Run A: dry for 10 s, then ice
+
+Car speed, slip and motor torque, with traction control (A1) and without (A2).
+
+![Run A](figures/runA.png)
+
+The first three seconds on ice: the controller cuts the torque to zero, lets the wheel slow
+down, and brings the slip back. Without it the slip stays at 1.0.
+
+![The first seconds on ice](figures/icezoom.png)
+
+### Where the tyre works on ice
+
+Every row of runs C1 and C2 from 2 s on, placed on the tyre's ice curve. With traction control
+the tyre works near the top of the curve; without it, at the far end.
+
+![The tyre on its ice curve](figures/opice.png)
+
+### All six runs
+
+![Speed at 20 s and peak slip](figures/summary.png)
 
 ## How to run
 
