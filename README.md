@@ -4,8 +4,8 @@
 ![CODESYS](https://img.shields.io/badge/CODESYS-V3.5-red)
 ![Protocol](https://img.shields.io/badge/Protocol-Modbus_TCP-green)
 
-The code and result logs of my BSc thesis, *Design and Implementation of a Hardware-in-the-Loop
-(HIL) Traction Control System for Electric Vehicles* (University of Debrecen, Electrical
+The code and result logs of my BSc thesis, *Design and Implementation of a Software-in-the-Loop
+(SIL) Traction Control System for Electric Vehicles* (University of Debrecen, Electrical
 Engineering BSc, 2026). This is the version behind the thesis draft of 29 October 2026.
 
 A Python program simulates the car. A traction controller written in Structured Text runs in a
